@@ -2,11 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "InputCoreTypes.h"
 #include "FlockManager.generated.h"
 
 class ABoidAgent;
+class IInputProcessor;
 class UCameraComponent;
-class UInputMappingContext;
 class UStaticMeshComponent;
 
 // Going out, coming back, or already home.
@@ -27,11 +28,16 @@ class AFlockManager : public AActor
 public:
 
 	AFlockManager();
+	virtual ~AFlockManager();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaTime) override;
 
 	void TryStartFlock();
+
+	// 1 separation, 2 alignment, 3 cohesion, R restart. Shift lowers 1/2/3.
+	void ApplyTuneKey(const FKey& Key, bool bShiftDown);
 
 	const TArray<TObjectPtr<ABoidAgent>>& GetAgents() const { return Agents; }
 
@@ -125,25 +131,13 @@ protected:
 	bool bFlockStarted = false;
 	FTimerHandle StartTimer;
 
-	// Key-down from last frame. Used only if the enhanced input bind did not stick.
-	bool bOneWasDown = false;
-	bool bTwoWasDown = false;
-	bool bThreeWasDown = false;
-	bool bRestartWasDown = false;
-	bool bTuningBound = false;
-
-	UPROPERTY()
-	TObjectPtr<UInputMappingContext> TuningContext;
+	TSharedPtr<IInputProcessor> KeyProcessor;
 
 	void SpawnAgents();
 	void FrameOverviewCamera();
+	void RegisterKeyProcessor();
+	void UnregisterKeyProcessor();
 	void UpdatePhase(float DeltaTime);
-	void SetupTuningInput();
-	void HandleTuningInput();
-	void TuneSeparation();
-	void TuneAlignment();
-	void TuneCohesion();
-	void RestartTrip();
 	void DrawFlockDebug() const;
 	void ApplyMarkerColor(UStaticMeshComponent* Marker, const FLinearColor& Color) const;
 
@@ -151,7 +145,4 @@ protected:
 	FVector GetCentroid() const;
 
 	void AdjustWeight(float& Weight, float Delta, float MaxValue);
-
-	// True only on the frame a key goes down. Checks the number row and the numpad.
-	bool WasKeyPressed(APlayerController* PlayerController, const FKey& Key, const FKey& AltKey, bool& bWasDown) const;
 };
