@@ -6,8 +6,13 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "InputAction.h"
+#include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
@@ -98,6 +103,7 @@ void AFlockManager::TryStartFlock()
 
 	SpawnAgents();
 	FrameOverviewCamera();
+	SetupTuningInput();
 }
 
 void AFlockManager::FrameOverviewCamera()
@@ -185,7 +191,14 @@ void AFlockManager::Tick(float DeltaTime)
 		return;
 	}
 
-	HandleTuningInput();
+	if (!bTuningBound)
+	{
+		SetupTuningInput();
+	}
+	if (!bTuningBound)
+	{
+		HandleTuningInput();
+	}
 	UpdatePhase(DeltaTime);
 
 	for (ABoidAgent* Agent : Agents)
@@ -269,6 +282,93 @@ void AFlockManager::AdjustWeight(float& Weight, float Delta, float MaxValue)
 	Weight = FMath::Clamp(Weight + Delta, 0.f, MaxValue);
 }
 
+bool AFlockManager::WasKeyPressed(APlayerController* PlayerController, const FKey& Key, const FKey& AltKey, bool& bWasDown) const
+{
+	const bool bDown = PlayerController->IsInputKeyDown(Key) || PlayerController->IsInputKeyDown(AltKey);
+	const bool bPressed = bDown && !bWasDown;
+	bWasDown = bDown;
+	return bPressed;
+}
+
+void AFlockManager::SetupTuningInput()
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PlayerController || bTuningBound)
+	{
+		return;
+	}
+
+	ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer();
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer) : nullptr;
+	UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerController->InputComponent);
+	if (!Subsystem || !EnhancedInput)
+	{
+		return;
+	}
+
+	TuningContext = NewObject<UInputMappingContext>(this);
+
+	UInputAction* SeparationAction = NewObject<UInputAction>(this);
+	SeparationAction->ValueType = EInputActionValueType::Boolean;
+	TuningContext->MapKey(SeparationAction, EKeys::One);
+	TuningContext->MapKey(SeparationAction, EKeys::NumPadOne);
+	EnhancedInput->BindAction(SeparationAction, ETriggerEvent::Started, this, &AFlockManager::TuneSeparation);
+
+	UInputAction* AlignmentAction = NewObject<UInputAction>(this);
+	AlignmentAction->ValueType = EInputActionValueType::Boolean;
+	TuningContext->MapKey(AlignmentAction, EKeys::Two);
+	TuningContext->MapKey(AlignmentAction, EKeys::NumPadTwo);
+	EnhancedInput->BindAction(AlignmentAction, ETriggerEvent::Started, this, &AFlockManager::TuneAlignment);
+
+	UInputAction* CohesionAction = NewObject<UInputAction>(this);
+	CohesionAction->ValueType = EInputActionValueType::Boolean;
+	TuningContext->MapKey(CohesionAction, EKeys::Three);
+	TuningContext->MapKey(CohesionAction, EKeys::NumPadThree);
+	EnhancedInput->BindAction(CohesionAction, ETriggerEvent::Started, this, &AFlockManager::TuneCohesion);
+
+	UInputAction* RestartAction = NewObject<UInputAction>(this);
+	RestartAction->ValueType = EInputActionValueType::Boolean;
+	TuningContext->MapKey(RestartAction, EKeys::R);
+	EnhancedInput->BindAction(RestartAction, ETriggerEvent::Started, this, &AFlockManager::RestartTrip);
+
+	Subsystem->AddMappingContext(TuningContext, 10);
+	bTuningBound = true;
+}
+
+void AFlockManager::TuneSeparation()
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	const bool bDecrease = PlayerController && (PlayerController->IsInputKeyDown(EKeys::LeftShift) || PlayerController->IsInputKeyDown(EKeys::RightShift));
+	AdjustWeight(SeparationWeight, bDecrease ? -0.25f : 0.25f, 5.f);
+}
+
+void AFlockManager::TuneAlignment()
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	const bool bDecrease = PlayerController && (PlayerController->IsInputKeyDown(EKeys::LeftShift) || PlayerController->IsInputKeyDown(EKeys::RightShift));
+	AdjustWeight(AlignmentWeight, bDecrease ? -0.25f : 0.25f, 5.f);
+}
+
+void AFlockManager::TuneCohesion()
+{
+	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	const bool bDecrease = PlayerController && (PlayerController->IsInputKeyDown(EKeys::LeftShift) || PlayerController->IsInputKeyDown(EKeys::RightShift));
+	AdjustWeight(CohesionWeight, bDecrease ? -0.25f : 0.25f, 5.f);
+}
+
+void AFlockManager::RestartTrip()
+{
+	Phase = EFlockPhase::Exploring;
+	ArriveHold = 0.f;
+	for (ABoidAgent* Agent : Agents)
+	{
+		if (Agent)
+		{
+			Agent->ResetToStart();
+		}
+	}
+}
+
 void AFlockManager::HandleTuningInput()
 {
 	APlayerController* PlayerController = UGameplayStatics::GetPlayerController(this, 0);
@@ -277,35 +377,24 @@ void AFlockManager::HandleTuningInput()
 		return;
 	}
 
-	// Shift makes 1/2/3 decrease instead of increase.
 	const bool bDecrease = PlayerController->IsInputKeyDown(EKeys::LeftShift) || PlayerController->IsInputKeyDown(EKeys::RightShift);
 	const float Step = bDecrease ? -0.25f : 0.25f;
 
-	if (PlayerController->WasInputKeyJustPressed(EKeys::One))
+	if (WasKeyPressed(PlayerController, EKeys::One, EKeys::NumPadOne, bOneWasDown))
 	{
 		AdjustWeight(SeparationWeight, Step, 5.f);
 	}
-	if (PlayerController->WasInputKeyJustPressed(EKeys::Two))
+	if (WasKeyPressed(PlayerController, EKeys::Two, EKeys::NumPadTwo, bTwoWasDown))
 	{
 		AdjustWeight(AlignmentWeight, Step, 5.f);
 	}
-	if (PlayerController->WasInputKeyJustPressed(EKeys::Three))
+	if (WasKeyPressed(PlayerController, EKeys::Three, EKeys::NumPadThree, bThreeWasDown))
 	{
 		AdjustWeight(CohesionWeight, Step, 5.f);
 	}
-
-	// Restart the trip with the current weights.
-	if (PlayerController->WasInputKeyJustPressed(EKeys::R))
+	if (WasKeyPressed(PlayerController, EKeys::R, EKeys::R, bRestartWasDown))
 	{
-		Phase = EFlockPhase::Exploring;
-		ArriveHold = 0.f;
-		for (ABoidAgent* Agent : Agents)
-		{
-			if (Agent)
-			{
-				Agent->ResetToStart();
-			}
-		}
+		RestartTrip();
 	}
 }
 

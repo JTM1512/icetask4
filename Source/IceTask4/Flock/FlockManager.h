@@ -6,6 +6,7 @@
 
 class ABoidAgent;
 class UCameraComponent;
+class UInputMappingContext;
 class UStaticMeshComponent;
 
 // Going out, coming back, or already home.
@@ -124,10 +125,25 @@ protected:
 	bool bFlockStarted = false;
 	FTimerHandle StartTimer;
 
+	// Key-down from last frame. Used only if the enhanced input bind did not stick.
+	bool bOneWasDown = false;
+	bool bTwoWasDown = false;
+	bool bThreeWasDown = false;
+	bool bRestartWasDown = false;
+	bool bTuningBound = false;
+
+	UPROPERTY()
+	TObjectPtr<UInputMappingContext> TuningContext;
+
 	void SpawnAgents();
 	void FrameOverviewCamera();
 	void UpdatePhase(float DeltaTime);
+	void SetupTuningInput();
 	void HandleTuningInput();
+	void TuneSeparation();
+	void TuneAlignment();
+	void TuneCohesion();
+	void RestartTrip();
 	void DrawFlockDebug() const;
 	void ApplyMarkerColor(UStaticMeshComponent* Marker, const FLinearColor& Color) const;
 
@@ -135,4 +151,7 @@ protected:
 	FVector GetCentroid() const;
 
 	void AdjustWeight(float& Weight, float Delta, float MaxValue);
+
+	// True only on the frame a key goes down. Checks the number row and the numpad.
+	bool WasKeyPressed(APlayerController* PlayerController, const FKey& Key, const FKey& AltKey, bool& bWasDown) const;
 };
