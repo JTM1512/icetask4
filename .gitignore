@@ -1,0 +1,37 @@
+# Per-user editor data
+Content/Collections/
+Content/Developers/
+
+# Unreal Engine generated folders
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+
+# Visual Studio
+.vs/
+*.sln
+*.slnx
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.user
+*.userosscache
+*.sln.docstates
+
+# Compiled binaries
+*.dll
+*.exe
+*.pdb
+*.lib
+*.obj
+*.o
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.tmp
+*~
